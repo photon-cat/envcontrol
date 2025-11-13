@@ -1,0 +1,211 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    CT2 PROTOCOL ANALYSIS - VISUAL SUMMARY                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. FRAME INTERLEAVING PATTERN                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+   CONTROLLER                                            SWITCHBOARD
+       │                                                      │
+       ├──── CMD_A (5C C7 33 35 96 A5 35 9A 35 35 6A) ───────>
+       │                                                      │
+       <────── STATUS (5C C7 33 35 5A 35 65 ...) ────────────┤
+       │                                                      │
+       ├──── CMD_B (5C C7 33 56 56 A5 35 9A 35 35 A6) ───────>
+       │                                                      │
+       <────── STATUS (5C C7 33 35 5A 35 65 ...) ────────────┤
+       │                                                      │
+       ├──── CMD_C (5C C7 33 56 96 A5 35 6A 35 35 99) ───────>
+       │                                                      │
+       <────── STATUS (5C C7 33 35 5A 35 65 ...) ────────────┤
+       │                                                      │
+       └───────────── Cycle repeats every ~900ms ────────────┘
+
+   ├────── 300ms ──────┤────── 300ms ──────┤────── 300ms ──────┤
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2. COMMAND FRAME STRUCTURE (11 bytes)                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────┬──────┬──────┬──────┬──────┬──────┬─────────┬──────────────┬──────┐
+    │  5C  │  C7  │  33  │  35/ │  56/ │  A5  │   35/   │  Relay Ctrl  │ Trlr │
+    │      │      │      │  56  │  96  │      │   65    │  (3 bytes)   │      │
+    └──────┴──────┴──────┴──────┴──────┴──────┴─────────┴──────────────┴──────┘
+     Sync (fixed)       Board  Sub   Frame   Variant    Control Data   Trailer
+                        Addr   Addr  Type
+
+    Byte 0-2:   5C C7 33         Always (sync marker)
+    Byte 3:     35 or 56         Board/group address
+    Byte 4:     56 or 96         Sub-address
+    Byte 5:     A5               Command frame marker
+    Byte 6:     35 or 65         Variant (normal/special)
+    Byte 7-9:   [Relay bytes]    Control data
+    Byte 10:    6A/A6/99/AA      Trailer (fixed per type)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3. STATUS FRAME STRUCTURE (28 bytes)                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────┬──────┬──────┬──────┬──────┬──────┬─────────┬──────────────┬───────┐
+    │  5C  │  C7  │  33  │  35  │  5A  │  35  │   35/   │   Payload    │Trailer│
+    │      │      │      │      │      │      │   65    │  (12 bytes)  │(9 B)  │
+    └──────┴──────┴──────┴──────┴──────┴──────┴─────────┴──────────────┴───────┘
+     Sync (fixed)       Fixed   Stat  Fixed  Variant   Status Data      Trailer
+                                Mark
+
+    Byte 0-2:   5C C7 33         Always (sync marker)
+    Byte 3:     35               Always 0x35
+    Byte 4:     5A               Status frame marker
+    Byte 5:     35               Always 0x35
+    Byte 6:     35 or 65         Variant (matches command)
+    Byte 7-18:  [Status data]    12 bytes of status info
+    Byte 19-27: [Trailer]        9 bytes variable
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4. THREE COMMAND TYPES (Board Addressing)                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ╔═══════════╦══════════════╦═════════════╦═══════════════╦══════════╗
+    ║ CMD Type  ║ Header Bytes ║ Board/Group ║ Relay (OFF)   ║ Trailer  ║
+    ╠═══════════╬══════════════╬═════════════╬═══════════════╬══════════╣
+    ║  CMD_A    ║  35 96 A5    ║      1      ║  9A 35 35     ║   6A     ║
+    ║  CMD_B    ║  56 56 A5    ║      2      ║  9A 35 35     ║   A6     ║
+    ║  CMD_C    ║  56 96 A5    ║      3      ║  6A 35 35     ║   99     ║
+    ╚═══════════╩══════════════╩═════════════╩═══════════════╩══════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5. VARIANT BYTE MEANING (Byte 6)                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  0x35 = NORMAL POLLING                                          │
+    │  • Continuous status check                                      │
+    │  • Relay bytes: XX 35 35 (de-energized)                         │
+    │  • Trailer: 6A/A6/99 (fixed per command type)                   │
+    └─────────────────────────────────────────────────────────────────┘
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  0x65 = RELAY ACTIVATION                                        │
+    │  • Sent during button press (AUTO or HAND)                      │
+    │  • Relay bytes: XX AA AA (energized)                            │
+    │  • Trailer: AA (all commands)                                   │
+    │  • Broadcast: All 3 commands sent in burst                      │
+    └─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6. RELAY STATE PATTERNS                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    State: OFF (Relay De-energized)
+    ┌────────────────────────────────────────────────────────────────┐
+    │  CMD_A:  5C C7 33 35 96 A5  35  9A 35 35  6A                   │
+    │  CMD_B:  5C C7 33 56 56 A5  35  9A 35 35  A6                   │
+    │  CMD_C:  5C C7 33 56 96 A5  35  6A 35 35  99                   │
+    │                             ^^^  ^^ ^^ ^^  ^^                   │
+    │                             Var  Relay     Trlr                 │
+    └────────────────────────────────────────────────────────────────┘
+
+    State: AUTO ACTIVE
+    ┌────────────────────────────────────────────────────────────────┐
+    │  CMD_A:  5C C7 33 35 96 A5  65  9A AA AA  AA                   │
+    │  CMD_B:  5C C7 33 56 56 A5  65  99 59 AA  AA                   │
+    │  CMD_C:  5C C7 33 56 96 A5  65  99 35 AA  AA                   │
+    │                             ^^^  ^^ ^^ ^^  ^^                   │
+    │                             Var  Relay     Trlr                 │
+    └────────────────────────────────────────────────────────────────┘
+
+    State: HAND ACTIVE (Similar pattern, sustained longer)
+    ┌────────────────────────────────────────────────────────────────┐
+    │  Pattern identical to AUTO but held for duration of button     │
+    │  Status bytes show progression: 35→56→5A→6A→AA                 │
+    └────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7. STATE MACHINE                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+         ┌─────────────────────────┐
+         │      IDLE (OFF)         │
+         │  Variant: 0x35          │
+         │  Relay: XX 35 35        │
+         │  Polling at 300ms       │
+         └───────┬─────────────────┘
+                 │
+      Button     │
+      Press      ▼
+         ┌─────────────────────────┐
+         │    ACTIVATING           │
+         │  Variant: 0x65          │
+         │  Relay: XX AA AA        │
+         │  Trailer: AA            │
+         │  Duration: 1 frame      │
+         └───────┬─────────────────┘
+                 │
+      Release    │
+                 ▼
+         ┌─────────────────────────┐
+         │   RETURN TO IDLE        │
+         │  Variant: 0x35          │
+         │  Relay: XX 35 35        │
+         │  Resume polling         │
+         └─────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 8. KEY DISCOVERIES                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ✓ Protocol is BIDIRECTIONAL (command → status)
+    ✓ Frames are INTERLEAVED in data stream
+    ✓ THREE command types cycle every 900ms
+    ✓ Variant byte (0x35/0x65) controls relay activation
+    ✓ Trailer byte is FIXED per command type, NOT a checksum
+    ✓ Relay activation is INSTANT (within 100ms frame)
+    ✓ Status response confirms relay state
+
+    ✗ Checksum: NOT FOUND (XOR, SUM8, 2's complement tested)
+    ✗ 5-board cycling: NOT OBSERVED (only 3 command types exist)
+    ✗ Intermediate relay states: NOT CAPTURED (binary ON/OFF)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9. UART SETTINGS                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    Baud Rate:     500,000 bps
+    Data Bits:     8
+    Parity:        Even
+    Stop Bits:     1
+    Flow Control:  None
+
+    Format:        500k_8E1
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 10. IMPLEMENTATION QUICK REFERENCE                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    TO POLL ALL BOARDS:
+    ┌──────────────────────────────────────────────────────────┐
+    │  1. Send CMD_A:  5C C7 33 35 96 A5 35 9A 35 35 6A       │
+    │  2. Receive STATUS (28 bytes starting 5C C7 33 35 5A)    │
+    │  3. Send CMD_B:  5C C7 33 56 56 A5 35 9A 35 35 A6       │
+    │  4. Receive STATUS                                       │
+    │  5. Send CMD_C:  5C C7 33 56 96 A5 35 6A 35 35 99       │
+    │  6. Receive STATUS                                       │
+    │  7. Wait 300ms, repeat                                   │
+    └──────────────────────────────────────────────────────────┘
+
+    TO ACTIVATE RELAY (BROADCAST):
+    ┌──────────────────────────────────────────────────────────┐
+    │  1. Send CMD_A:  5C C7 33 35 96 A5 65 9A AA AA AA       │
+    │  2. Send CMD_B:  5C C7 33 56 56 A5 65 99 59 AA AA       │
+    │  3. Send CMD_C:  5C C7 33 56 96 A5 65 99 35 AA AA       │
+    │  4. Receive 3 STATUS responses                           │
+    │  5. To release: resume normal polling (variant 0x35)     │
+    └──────────────────────────────────────────────────────────┘
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  Analysis Date: 2025-11-11                                                   ║
+║  Captures:      3 files, 794 frames total                                    ║
+║  Protocol:      CT2 Bidirectional Half-Duplex                                ║
+║  Confidence:    HIGH (multiple captures confirm patterns)                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
