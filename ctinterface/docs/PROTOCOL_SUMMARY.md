@@ -76,6 +76,9 @@ Offset  Field           Values          Description
 - **Board 2**: 16 bytes (channels 17-32)
 - **Board 3**: 8 bytes (channels 33-40)
 
+> **Board 1 slot groups:** The 16 channel bytes are split across two consecutive frames.
+> Trailer `59 95 A9 95` carries slots 0-7, trailer `A9 95 A9 5A` carries slots 8-15.
+
 **Example STATUS response (Board 1, 16 channels):**
 ```
 5C C7 33 35 5A 35 65 [16 channel state bytes] [trailer...]
@@ -117,6 +120,10 @@ Time    | Direction | Frame      | Address  | Target  | Channels    | Payload
 | 0x6A | `0110 1010`  | **HAND step 3**| HAND activating (contacts moving)|
 | 0xAA | `1010 1010`  | **HAND ON**    | HAND fully latched               |
 
+> **Slot numbering:** Payload bytes are currently referenced by zero-based slot
+> numbers (`slot0…slot7`). The physical channel order is non-sequential and still being
+> mapped, so the decoder reports slot positions directly until that mapping is complete.
+
 **Note:** AUTO+ON encoding is channel-specific (0x59 or 0x99 depending on channel).
 
 ### HAND Activation Sequence
@@ -157,6 +164,13 @@ HAND ON (0xAA)     ← Fully latched
 **Verified behavior:**
 - `capture_20251111_161459`: Controller sends variant=`0x65` (activate) but switch in OFF → relay stays OFF
 - `capture_20251111_161616`: Controller sends variant=`0x65` (activate) with switch in AUTO → relay activates, STATUS changes from `0x35` to `0x59`
+
+Even though the controller frames are identical in both captures, the status payloads
+diverge because the HOA switch decides whether the command is honored. In `_161459`
+every slot stays at `0x35`, telling the controller its ON command was blocked. In
+`_161616` the same command causes the relevant slots to flip to `0x59/0x99`
+(AUTO+ON), proving that the decoded board state always reflects what the controller
+sees on the bus.
 
 ---
 
